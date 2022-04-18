@@ -2,7 +2,7 @@ import { Boom } from '@hapi/boom'
 import { createHash } from 'crypto'
 import { proto } from '../../WAProto'
 import type { AuthenticationCreds, SignalCreds, SocketConfig } from '../Types'
-import { Binary, BinaryNode, getAllBinaryNodeChildren, jidDecode, S_WHATSAPP_NET } from '../WABinary'
+import { BinaryNode, getAllBinaryNodeChildren, jidDecode, S_WHATSAPP_NET } from '../WABinary'
 import { Curve, hmacSign } from './crypto'
 import { encodeInt } from './generics'
 import { createSignalIdentity } from './signal'
@@ -48,7 +48,7 @@ export const generateLoginNode = (userJid: string, config: ClientPayloadConfig):
 		username: +user,
 		device: device,
 	}
-	return payload
+	return proto.ClientPayload.fromObject(payload)
 }
 
 export const generateRegistrationNode = (
@@ -69,7 +69,7 @@ export const generateRegistrationNode = (
 			secondary: +(browserVersion[1] || 0),
 			tertiary: +(browserVersion[2] || 0),
 		},
-		platformType: proto.CompanionProps.CompanionPropsPlatformType.CHROME,
+		platformType: proto.CompanionProps.CompanionPropsPlatformType[config.browser[1].toUpperCase()] || proto.CompanionProps.CompanionPropsPlatformType.CHROME,
 		requireFullSync: false,
 	}
 
@@ -89,7 +89,7 @@ export const generateRegistrationNode = (
 		},
 	}
 
-	return registerPayload
+	return proto.ClientPayload.fromObject(registerPayload)
 }
 
 export const configureSuccessfulPairing = (
@@ -116,12 +116,21 @@ export const configureSuccessfulPairing = (
 	const account = proto.ADVSignedDeviceIdentity.decode(details)
 	const { accountSignatureKey, accountSignature } = account
 
-	const accountMsg = Binary.build(new Uint8Array([6, 0]), account.details, signedIdentityKey.public).readByteArray()
+	const accountMsg = Buffer.concat([
+		Buffer.from([6, 0]),
+		account.details,
+		signedIdentityKey.public
+	])
 	if(!Curve.verify(accountSignatureKey, accountMsg, accountSignature)) {
 		throw new Boom('Failed to verify account signature')
 	}
 
-	const deviceMsg = Binary.build(new Uint8Array([6, 1]), account.details, signedIdentityKey.public, account.accountSignatureKey).readByteArray()
+	const deviceMsg = Buffer.concat([
+		new Uint8Array([6, 1]),
+		account.details,
+		signedIdentityKey.public,
+		account.accountSignatureKey
+	])
 	account.deviceSignature = Curve.sign(signedIdentityKey.private, deviceMsg)
 
 	const identity = createSignalIdentity(jid, accountSignatureKey)

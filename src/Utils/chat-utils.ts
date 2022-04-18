@@ -2,7 +2,7 @@ import { Boom } from '@hapi/boom'
 import type { Logger } from 'pino'
 import { proto } from '../../WAProto'
 import { AuthenticationCreds, BaileysEventMap, Chat, ChatModification, ChatMutation, Contact, LastMessageList, LTHashState, WAPatchCreate, WAPatchName } from '../Types'
-import { BinaryNode, getBinaryNodeChild, getBinaryNodeChildren } from '../WABinary'
+import { BinaryNode, getBinaryNodeChild, getBinaryNodeChildren, jidNormalizedUser } from '../WABinary'
 import { aesDecrypt, aesEncrypt, hkdf, hmacSign } from './crypto'
 import { toNumber } from './generics'
 import { LT_HASH_ANTI_TAMPERING } from './lt-hash'
@@ -458,7 +458,16 @@ export const chatModificationToAppPatch = (
 
 		const messageRange: proto.ISyncActionMessageRange = {
 			lastMessageTimestamp: lastMsg?.messageTimestamp,
-			messages: lastMessages
+			messages: lastMessages.map(
+				m => {
+					if(m.key.participant) {
+						m.key = { ...m.key }
+						m.key.participant = jidNormalizedUser(m.key.participant)
+					}
+
+					return m
+				}
+			)
 		}
 		return messageRange
 	}
@@ -574,11 +583,15 @@ export const processSyncActions = (
 				name: action.contactAction!.fullName
 			}
 		} else if(action?.pushNameSetting) {
-			map['creds.update'] = {
-				me: { ...me, name: action?.pushNameSetting?.name! }
-			}
+			map['creds.update'] = map['creds.update'] || { }
+			map['creds.update'].me = { ...me, name: action?.pushNameSetting?.name! }
 		} else if(action?.pinAction) {
 			update.pin = action.pinAction?.pinned ? toNumber(action.timestamp) : undefined
+		} else if(action?.unarchiveChatsSetting) {
+			map['creds.update'] = map['creds.update'] || { }
+			map['creds.update'].accountSettings = { unarchiveChats: !!action.unarchiveChatsSetting.unarchiveChats }
+
+			logger.info(`archive setting updated => '${action.unarchiveChatsSetting.unarchiveChats}'`)
 		} else {
 			logger.warn({ action, id }, 'unprocessable update')
 		}
